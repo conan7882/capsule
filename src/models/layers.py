@@ -322,7 +322,6 @@ def conv(filter_size,
         if add_summary:
             tf.summary.histogram(
                 'weights/{}'.format(name), weights, collections = ['train'])
-
         outputs = tf.nn.conv2d(inputs,
                                filter=weights,
                                strides=stride,

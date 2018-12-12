@@ -15,6 +15,11 @@ from src.utils.dataflow import get_rng
 def identity(im):
     return im
 
+def concat_pair(im_1, im_2):
+    im_1 = np.expand_dims(im_1, axis=-1)
+    im_2 = np.expand_dims(im_2, axis=-1)
+    return np.concatenate((im_1, im_2), axis=-1)
+
 class MNISTData(object):
     """ class for MNIST dataflow
 
@@ -174,3 +179,72 @@ class MNISTData(object):
 
     def reset_epochs_completed(self):
         self._epochs_completed = 0
+
+class MNISTPair(MNISTData):
+    def __init__(self,
+                 name,
+                 label_dict,
+                 batch_dict_name=None,
+                 data_dir='',
+                 is_diff=True,
+                 shuffle=True,
+                 pf=identity,
+                 pairprocess=concat_pair,
+                 ):
+        self._pair_fnc = pairprocess
+        self._label_dict = label_dict
+        self._diff = is_diff
+        super(MNISTPair, self).__init__(name=name,
+                                        batch_dict_name=batch_dict_name,
+                                        data_dir=data_dir,
+                                        shuffle=shuffle,
+                                        pf=pf,)
+
+    def size(self):
+        return int(np.floor(self.im_list.shape[0] / 2.0))
+
+    def next_batch(self):
+        assert self._batch_size <= self.size(), \
+          "batch_size {} cannot be larger than data size {}".\
+           format(self._batch_size, self.size())
+        # start = self._image_id
+        # self._image_id += self._batch_size * 2
+        # end = self._image_id
+        batch_files = []
+        batch_label = []
+        start = self._image_id
+        for data_id in range(0, self._batch_size):
+            im_1 = np.reshape(self.im_list[start], [28, 28])
+            label_1 = self.label_list[start]
+            off_id = 1
+            label_2 = self.label_list[start + off_id]
+            if self._diff:
+                
+                while label_2 == label_1 and start+off_id+1 < self.size():
+                    off_id += 1
+                    label_2 = self.label_list[start + off_id]
+                if label_1 == label_2:
+                    off_id = 0
+                    while label_2 == label_1 and start+off_id-1 > 0:
+                        off_id -= 1
+                        label_2 = self.label_list[start + off_id]
+                label_2 = self.label_list[start + off_id]
+
+            im_2 = np.reshape(self.im_list[start + off_id], [28, 28])
+            
+            im = self._pair_fnc(im_1, im_2)
+            im = np.expand_dims(im, axis=-1)
+            batch_files.append(im)
+
+            # label = self._label_dict['{}{}'.format(label_1, label_2)]
+            label = [label_1, label_2] if label_1 < label_2 else [label_2, label_1]
+            batch_label.append(label)
+            start = start + 2
+        end = start
+        self._image_id = end
+
+        if self._image_id + self._batch_size > self.size():
+            self._epochs_completed += 1
+            self._image_id = 0
+            self._suffle_files()
+        return [batch_files, batch_label]

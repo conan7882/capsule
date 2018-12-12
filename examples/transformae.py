@@ -48,9 +48,6 @@ def train():
     FLAGS = get_args()
     save_path = SAVE_PATH
 
-    n_capsule = 30
-    n_recogition = 10
-    n_generation = 20
     transform_type = FLAGS.transform
 
     if FLAGS.transform == 'shift':
@@ -60,7 +57,7 @@ def train():
         n_pose = 2
     elif FLAGS.transform == 'affine':
         n_capsule = 100
-        n_recogition = 50
+        n_recogition = 100
         n_generation = 100
         n_pose = 9
 

@@ -12,8 +12,6 @@ import src.models.layers as L
 import src.models.capsule as capsule_module
 import src.utils.viz as viz
 from src.models.transformer import spatial_transformer
-# import src.models.modules as modules
-# import src.models.losses as losses
 
 
 INIT_W = tf.random_normal_initializer(stddev=0.02)
