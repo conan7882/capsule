@@ -29,37 +29,37 @@ def get_args():
     parser.add_argument('--train', action='store_true',
                         help='Train the model.')
     parser.add_argument('--ae', action='store_true',
-                        help='Train the model.')
-    parser.add_argument('--test', action='store_true',
-                        help='test')
+                        help='add reconstruction')
+    parser.add_argument('--eval', action='store_true',
+                        help='eval')
 
-    parser.add_argument('--dataset', type=str, default='mnist',
-                        help='Dataset used for experiment.')
-
+    parser.add_argument('--folder', type=str, default='test',
+                        help='save folder name')
     parser.add_argument('--load', type=int, default=99,
                         help='Load step of pre-trained')
+
     parser.add_argument('--lr', type=float, default=0.001,
                         help='Init learning rate')
-    parser.add_argument('--keep_prob', type=float, default=1.,
-                        help='keep_prob')
     parser.add_argument('--bsize', type=int, default=128,
                         help='Init learning rate')
     parser.add_argument('--maxepoch', type=int, default=50,
                         help='Max iteration')
 
-    parser.add_argument('--transform', type=str, default='shift',
-                        help='Type of transformation.')
+    parser.add_argument('--routing', type=int, default=3,
+                        help='number of routing')
 
     return parser.parse_args()
 
-def test():
+def eval():
     FLAGS = get_args()
+    bsize = FLAGS.bsize
 
-    train_data, test_data = loader.two_digits_mnist(canvas_size=46, batch_size=1)
-    im_size = 46
+    # train_data, test_data = loader.load_mnist(bsize, data_path=MNIST_PATH)
+    im_size = 40
     n_channels = 1
+    train_data, test_data = loader.two_digits_mnist(canvas_size=im_size, batch_size=bsize)
 
-    n_routing = 1
+    n_routing = 3
 
     if FLAGS.ae:
         CapsNetModel = CapsNetMNISTAE
@@ -68,11 +68,13 @@ def test():
         CapsNetModel = CapsNetMNIST
         model_type = 'capnet'
 
-    save_path = os.path.join(SAVE_PATH, model_type)
+    save_path = os.path.join(SAVE_PATH, model_type, FLAGS.folder)
     save_path = save_path + '/'
 
-    test_model = CapsNetModel(FLAGS.bsize, im_size, n_channels, n_class=10, n_routing=n_routing, n_pred_class=2)
-    test_model.create_valid_model()
+    test_model = CapsNetModel(
+        bsize, im_size, n_channels,
+        n_class=10, n_routing=n_routing, n_pred_class=2, translate_im_size=im_size)
+    test_model.create_eval_model()
 
     sessconfig = tf.ConfigProto()
     sessconfig.gpu_options.allow_growth = True
@@ -80,52 +82,18 @@ def test():
         writer = tf.summary.FileWriter(save_path)
         saver = tf.train.Saver()
         sess.run(tf.global_variables_initializer())
-        saver.save(sess, '{}capnet-epoch-{}'.format(save_path, FLAGS.load))
-        test_model.test(sess, test_data)
-
-# def ae():
-#     FLAGS = get_args()
-#     save_path = SAVE_PATH
-
-#     train_data, test_data = loader.load_mnist(FLAGS.bsize, data_path=MNIST_PATH)
-#     im_size = 28
-#     n_channels = 1
-
-#     # init training model
-#     train_model = CapNetMNISTAE(FLAGS.bsize, im_size, n_channels, n_class=10, n_routing=2)
-#     train_model.create_train_model()
-
-#     # init valid model
-#     valid_model = CapNetMNISTAE(FLAGS.bsize, im_size, n_channels, n_class=10, n_routing=2)
-#     valid_model.create_valid_model()
-
-#     sessconfig = tf.ConfigProto()
-#     sessconfig.gpu_options.allow_growth = True
-#     with tf.Session(config=sessconfig) as sess:
-#         writer = tf.summary.FileWriter(save_path)
-#         saver = tf.train.Saver()
-#         sess.run(tf.global_variables_initializer())
-#         writer.add_graph(sess.graph)
-
-#         for epoch_id in range(FLAGS.maxepoch):
-#             if epoch_id > 50:
-#                 lr = FLAGS.lr / 2.
-#             elif epoch_id > 100:
-#                 lr = FLAGS.lr / 10.
-#             else:
-#                 lr = FLAGS.lr
-#             train_model.train_epoch(
-#                 sess, train_data, lr, summary_writer=writer)
-#             valid_model.valid_epoch(sess, test_data, summary_writer=writer)
+        saver.restore(sess, '{}capnet-epoch-{}'.format(save_path, FLAGS.load))
+        test_model.eval_epoch(sess, test_data)
 
 def train():
     FLAGS = get_args()
 
     train_data, test_data = loader.load_mnist(FLAGS.bsize, data_path=MNIST_PATH)
     im_size = 28
+    translate_im_size = 28
     n_channels = 1
 
-    n_routing = 1
+    n_routing = 3
 
     if FLAGS.ae:
         CapsNetModel = CapsNetMNISTAE
@@ -134,15 +102,19 @@ def train():
         CapsNetModel = CapsNetMNIST
         model_type = 'capnet'
 
-    save_path = os.path.join(SAVE_PATH, model_type)
+    save_path = os.path.join(SAVE_PATH, model_type, FLAGS.folder)
     save_path = save_path + '/'
 
     # init training model
-    train_model = CapsNetModel(FLAGS.bsize, im_size, n_channels, n_class=10, n_routing=n_routing, translate_im_size=28, shift_range=None)
+    train_model = CapsNetModel(
+        FLAGS.bsize, im_size, n_channels, n_class=10, n_routing=n_routing,
+        translate_im_size=translate_im_size, shift_range=[[-2, 2], [-2, 2]])
     train_model.create_train_model()
 
     # init valid model
-    valid_model = CapsNetModel(FLAGS.bsize, im_size, n_channels, n_class=10, n_routing=n_routing, translate_im_size=28, shift_range=None)
+    valid_model = CapsNetModel(
+        FLAGS.bsize, im_size, n_channels, n_class=10, n_routing=n_routing,
+        translate_im_size=translate_im_size, shift_range=[[-2, 2], [-2, 2]])
     valid_model.create_valid_model()
 
     # config = tf.ConfigProto()
@@ -159,12 +131,6 @@ def train():
         lr = FLAGS.lr
         for epoch_id in range(FLAGS.maxepoch):
             lr = lr * 0.95
-            # if epoch_id > 50:
-            #     lr = FLAGS.lr / 2.
-            # elif epoch_id > 100:
-            #     lr = FLAGS.lr / 10.
-            # else:
-            #     lr = FLAGS.lr
             start_time = time.time()
             train_model.train_epoch(
                 sess, train_data, lr, summary_writer=writer)
@@ -178,8 +144,8 @@ if __name__ == "__main__":
 
     if FLAGS.train:
         train()
-    if FLAGS.test:
-        test()
+    if FLAGS.eval:
+        eval()
 
 
 

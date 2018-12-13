@@ -63,14 +63,14 @@ class CapsNetMNIST(BaseModel):
         else:
             self.image = self.raw_image
 
-        self.label = tf.placeholder(tf.int64, [None], 'label')
+        self.label = tf.placeholder(tf.int32, [None, self.n_pred_class], 'label')
         self.lr = tf.placeholder(tf.float32, name='lr')
 
     def create_train_model(self):
         """ create graph for training """
         self.set_is_training(True)
         self._create_train_input()
-        self.layers['DigitCaps'], self.layers['bij'], self.layers['aij'] = self._cap_encoder(self.image)
+        self.layers['DigitCaps'], self.layers['bij'] = self._cap_encoder(self.image)
         self.layers['pred'] = self.get_prediction()
 
         self.train_op = self.get_train_op()
@@ -95,16 +95,30 @@ class CapsNetMNIST(BaseModel):
                 shift_range=self.shift_range)
         else:
             self.image = self.raw_image
-        self.label = tf.placeholder(tf.int64, [None], 'label')
+        self.label = tf.placeholder(tf.int32, [None, self.n_pred_class], 'label')
 
     def create_valid_model(self):
         """ create graph for validation """
         self.set_is_training(False)
         self._create_valid_input()
-        self.layers['DigitCaps'], self.layers['bij'], self.layers['aij'] = self._cap_encoder(self.image)
+        self.layers['DigitCaps'], self.layers['bij'] = self._cap_encoder(self.image)
         self.layers['pred'] = self.get_prediction()
 
         self.loss_op = self.get_loss()
+        self.accuracy_op = self.get_accuracy()
+        # self.routing_op = self.routing()
+        # self.init_routing_op = self.init_routing()
+        self.valid_summary_op = self.get_valid_summary()
+        self.epoch_id = 0
+
+    def create_eval_model(self):
+        """ create graph for evaluation """
+        self.set_is_training(False)
+        self._create_valid_input()
+        self.layers['DigitCaps'], self.layers['bij'] = self._cap_encoder(self.image)
+        self.layers['pred'] = self.get_prediction()
+
+        # self.loss_op = self.get_loss()
         self.accuracy_op = self.get_accuracy()
         # self.routing_op = self.routing()
         # self.init_routing_op = self.init_routing()
@@ -120,7 +134,6 @@ class CapsNetMNIST(BaseModel):
 
         with tf.variable_scope('CapNetEncoder', reuse=tf.AUTO_REUSE):
             bij_list = []
-            aij_list = []
             conv_out = L.conv(
                 filter_size=9, out_dim=out_dim, stride=1,
                 layer_dict=self.layers, inputs=inputs, bn=False,
@@ -134,24 +147,26 @@ class CapsNetMNIST(BaseModel):
                 init_w=INIT_W, wd=0, is_training=self.is_training,
                 name='conv_capsule_wo_rounting')
 
-            digit_caps, bij, aij = capsule_module.fc_capsule(
+            digit_caps, bij = capsule_module.fc_capsule(
                 inputs=primary_caps, bsize=self.bsize, n_routing=self.n_routing,
                 out_n_cap=self.n_class, out_cap_size=16,
                 init_w=INIT_W, wd=0, is_training=self.is_training,
                 name='fc_capsule')
             bij_list.append(bij)
-            aij_list.append(aij)
 
-        return digit_caps, bij_list, aij_list
+        return digit_caps, bij_list
 
     def get_prediction(self):
         with tf.name_scope('prediction'):
             digit_caps = self.layers['DigitCaps'] # [bsize, n_class, size_cap]
             caps_norm = tf.reduce_sum(digit_caps ** 2, axis=-1) # [bsize, n_class]
 
-            # _, pred = tf.nn.top_k(caps_norm, k=self.n_pred_class, sorted=False)
-            
-            pred = tf.argmax(caps_norm, axis=-1)
+            if self.n_pred_class > 1:
+                _, pred = tf.nn.top_k(caps_norm, k=self.n_pred_class, sorted=True)
+                pred, _ = tf.nn.top_k(pred, k=self.n_pred_class, sorted=True)
+            else:
+                pred = tf.argmax(caps_norm, axis=-1)
+                pred = tf.expand_dims(pred, axis=-1)
             return pred
 
     # def init_routing(self):
@@ -180,7 +195,7 @@ class CapsNetMNIST(BaseModel):
 
     def _get_margin_loss(self):
         with tf.name_scope('margin_loss'):
-            label = self.label # [bsize]
+            label = tf.squeeze(self.label, axis=-1) # [bsize]
             label_one_hot = tf.one_hot(label, self.n_class) # [bsize, n_class]
 
             digit_caps = self.layers['DigitCaps'] # [bsize, n_class, size_cap]
@@ -198,8 +213,9 @@ class CapsNetMNIST(BaseModel):
     def get_accuracy(self):
         with tf.name_scope('accuracy'):
             label = self.label
-            pred = self.layers['pred']
+            pred = tf.cast(self.layers['pred'], tf.int32)
             acc = tf.reduce_mean(tf.cast(tf.equal(label, pred), tf.float32))
+
             return acc
 
     def _get_optimizer(self):
@@ -293,7 +309,7 @@ class CapsNetMNIST(BaseModel):
             summary_val=cur_summary,
             summary_writer=summary_writer)
 
-    def test(self, sess, valid_data, summary_writer=None):
+    def eval_epoch(self, sess, valid_data, summary_writer=None):
         """ 
 
         Args:
@@ -303,53 +319,38 @@ class CapsNetMNIST(BaseModel):
             saved if None.
         """
 
-        display_name_list = ['loss', 'accuracy']
+        display_name_list = ['accuracy']
         cur_summary = None
 
         valid_data.reset_epochs_completed()
         step = 0
-        loss_sum = 0
         acc_sum = 0
-        self.epoch_id += 1
 
-        batch_data = valid_data.next_batch_dict()
-        im = batch_data['im']
-        label = batch_data['label']
-        pred = sess.run(
-            self.layers['pred'], 
-            feed_dict={self.raw_image: im})
-        print(pred)
-        # loss, acc = sess.run(
-        #     [self.loss_op, self.accuracy_op], 
-        #     feed_dict={self.raw_image: im,
-        #                 self.label: label})
-        # print(acc)
-        # while valid_data.epochs_completed < 1:
-        #     step += 1
+        while valid_data.epochs_completed < 1:
+            step += 1
 
-        #     batch_data = valid_data.next_batch_dict()
-        #     im = batch_data['im']
-        #     label = batch_data['label']
+            batch_data = valid_data.next_batch_dict()
+            im = batch_data['im']
+            label = batch_data['label']
 
-        #     loss, acc = sess.run(
-        #         [self.loss_op, self.accuracy_op], 
-        #         feed_dict={self.raw_image: im,
-        #                    self.label: label})
-        #     loss_sum += loss
-        #     acc_sum += acc
+            acc = sess.run(
+                self.accuracy_op, 
+                feed_dict={self.raw_image: im,
+                           self.label: label})
+            acc_sum += acc
 
-        # print('==== [Valid] ====', end='')
+        print('==== [Valid] ====', end='')
         # cur_summary = sess.run(
         #     self.valid_summary_op, 
         #     feed_dict={self.raw_image: im})
-        # viz.display(
-        #     self.epoch_id,
-        #     step,
-        #     [loss_sum, acc_sum],
-        #     display_name_list,
-        #     'valid',
-        #     summary_val=cur_summary,
-        #     summary_writer=summary_writer)
+        viz.display(
+            self.epoch_id,
+            step,
+            [acc_sum],
+            display_name_list,
+            'valid',
+            summary_val=cur_summary,
+            summary_writer=summary_writer)
 
     def valid_epoch(self, sess, valid_data, summary_writer=None):
         """ 
@@ -422,7 +423,7 @@ class CapsNetMNISTAE(CapsNetMNIST):
                 self.layers['cur_input'] = masked_cap
                 L.linear(out_dim=512, name='fc_1', nl=tf.nn.relu)
                 L.linear(out_dim=1024, name='fc_2', nl=tf.nn.relu)
-                L.linear(out_dim=784, name='output', nl=tf.sigmoid)
+                L.linear(out_dim=self.im_h*self.im_w*self.n_channels, name='output', nl=tf.sigmoid)
             out = tf.reshape(self.layers['cur_input'], (-1, self.im_h, self.im_w, self.n_channels))
         return out
 
@@ -430,7 +431,7 @@ class CapsNetMNISTAE(CapsNetMNIST):
         """ create graph for training """
         self.set_is_training(True)
         self._create_train_input()
-        self.layers['DigitCaps'], self.layers['bij'], self.layers['aij'] = self._cap_encoder(self.image)
+        self.layers['DigitCaps'], self.layers['bij'] = self._cap_encoder(self.image)
         self.layers['pred'] = self.get_prediction()
         self.layers['reconstruction'] = self._cap_decoder(self.layers['DigitCaps'])
 
@@ -447,7 +448,7 @@ class CapsNetMNISTAE(CapsNetMNIST):
         """ create graph for validation """
         self.set_is_training(False)
         self._create_valid_input()
-        self.layers['DigitCaps'], self.layers['bij'], self.layers['aij'] = self._cap_encoder(self.image)
+        self.layers['DigitCaps'], self.layers['bij'] = self._cap_encoder(self.image)
         self.layers['pred'] = self.get_prediction()
         self.layers['reconstruction'] = self._cap_decoder(self.layers['DigitCaps'])
 

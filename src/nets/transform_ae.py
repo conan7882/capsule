@@ -7,10 +7,10 @@ import numpy as np
 import tensorflow as tf
 
 from src.nets.base import BaseModel
-import src.models.transformation as transformation
+import src.utils.viz as viz
 import src.models.layers as L
 import src.models.capsule as capsule_module
-import src.utils.viz as viz
+import src.models.transformation as transformation
 from src.models.transformer import spatial_transformer
 
 
@@ -18,19 +18,25 @@ INIT_W = tf.random_normal_initializer(stddev=0.02)
 # INIT_W = tf.keras.initializers.he_normal()
 
 class TransformAE(BaseModel):
-    """ class for transforming autoencoder """
-    def __init__(self, im_size, n_channels, n_capsule, n_recogition, n_generation, n_pose,
-                 transform_type):
+    """ class for transforming autoencoder from "Transforming Auto-encoders" """
+    def __init__(self, im_size, n_channels, n_capsule,
+                 n_recognition, n_generation, n_pose, transform_type):
         """
         Args:
             im_size (int or list with length 2): size of generate image 
             n_channels (int): number of image channels
+            n_capsule (int): number of capusules
+            n_recognition (int): number of recognition unit in each capsule.
+            n_generation (int): number of generation unit in each capsule.
+            n_pose (int): number of pose unit in each capsule.
+            transform_type (str): type of transformation for pose.
+                'shift' - pose shift. 'affine' - affine transformation
         """
         im_size = L.get_shape2D(im_size)
         self.im_h, self.im_w = im_size
         self.n_channels = n_channels
         self.n_capsule = n_capsule
-        self.n_recogition = n_recogition
+        self.n_recognition = n_recognition
         self.n_generation = n_generation
         self.n_pose = n_pose
         self.transform_type = transform_type
@@ -43,6 +49,8 @@ class TransformAE(BaseModel):
         self.image = tf.placeholder(
             tf.float32, [None, self.im_h, self.im_w, self.n_channels],
             name='image')
+
+        # transform input image
         if self.transform_type == 'shift':
             self.label = tf.contrib.image.translate(
                 self.image,
@@ -60,7 +68,7 @@ class TransformAE(BaseModel):
         """ create graph for training """
         self.set_is_training(True)
         self._create_train_input()
-        self.layers['pred'] = self._creat_model(self.image, self.pose_shift)
+        self.layers['pred'] = self._create_model(self.image, self.pose_shift)
 
         self.train_op = self.get_train_op()
         self.loss_op = self.get_loss()
@@ -74,6 +82,7 @@ class TransformAE(BaseModel):
             tf.float32, [None, self.im_h, self.im_w, self.n_channels],
             name='image')
 
+        # transform input image
         if self.transform_type == 'shift':
             self.label = tf.contrib.image.translate(
                 self.image,
@@ -89,18 +98,19 @@ class TransformAE(BaseModel):
         """ create graph for validation """
         self.set_is_training(False)
         self._create_valid_input()
-        self.layers['pred'] = self._creat_model(self.image, self.pose_shift)
+        self.layers['pred'] = self._create_model(self.image, self.pose_shift)
 
         self.loss_op = self.get_loss()
         self.valid_summary_op = self.get_valid_summary()
         self.epoch_id = 0
         
-    def _creat_model(self, inputs, pose_shift):
+    def _create_model(self, inputs, pose_shift):
+        """ create the transform autoencoder """
         with tf.variable_scope('transforming_AE', reuse=tf.AUTO_REUSE):
             cap_out = []
             for capsule_id in range(self.n_capsule):
                 out = capsule_module.reconstruct_capsule(
-                    inputs=inputs, num_recogition=self.n_recogition,
+                    inputs=inputs, num_recognition=self.n_recognition,
                     num_generation=self.n_generation,
                     num_pose=self.n_pose, pose_shift=pose_shift,
                     wd=0, init_w=INIT_W, bn=False,
@@ -112,10 +122,12 @@ class TransformAE(BaseModel):
             return tf.nn.sigmoid(cap_out)
 
     def _get_loss(self):
-        label = self.label
-        prediction = self.layers['pred']
-        loss = tf.reduce_sum((label - prediction) ** 2, axis=[1,2,3])
-        return tf.reduce_mean(loss)
+        """ compute the reconstruction loss """
+        with tf.name_scope('reconstruction_loss'):
+            label = self.label
+            prediction = self.layers['pred']
+            loss = tf.reduce_sum((label - prediction) ** 2, axis=[1,2,3])
+            return tf.reduce_mean(loss)
 
     def _get_optimizer(self):
         return tf.train.AdamOptimizer(self.lr)
@@ -143,8 +155,9 @@ class TransformAE(BaseModel):
         Args:
             sess (tf.Session): tensorflow session
             train_data (DataFlow): DataFlow for training set
+            init_lr (float): learning rate
             summary_writer (tf.FileWriter): write for summary. No summary will be
-            saved if None.
+                saved if None.
         """
 
         display_name_list = ['loss']
@@ -163,6 +176,7 @@ class TransformAE(BaseModel):
             batch_data = train_data.next_batch_dict()
             im = batch_data['im']
 
+            # generate random transformation
             bsize = im.shape[0]
             if self.transform_type == 'shift':
                 pose_shift = transformation.gen_pose_shift(bsize, self.n_pose)
@@ -210,9 +224,9 @@ class TransformAE(BaseModel):
 
         Args:
             sess (tf.Session): tensorflow session
-            train_data (DataFlow): DataFlow for training set
+            valid_data (DataFlow): DataFlow for validation set
             summary_writer (tf.FileWriter): write for summary. No summary will be
-            saved if None.
+                saved if None.
         """
 
         display_name_list = ['loss']
@@ -228,6 +242,7 @@ class TransformAE(BaseModel):
             batch_data = valid_data.next_batch_dict()
             im = batch_data['im']
 
+            # generate random transformation
             bsize = im.shape[0]
             if self.transform_type == 'shift':
                 pose_shift = transformation.gen_pose_shift(bsize, self.n_pose)

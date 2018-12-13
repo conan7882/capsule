@@ -10,6 +10,16 @@ import src.models.layers as L
 SMALL_NUM = 1e-9
 
 def capsule_batch_flatten(x):
+    """ Flat capsule grid to capsule vector for fc layer
+        
+        Args:
+            x (tensor): tensor of capsule grid. The dim of shape must be greater than 2.
+                The first dim is the batch and the last shape is the size of capsule.
+                [bsize, h, w, n_capsule_channel, capsule_size]
+
+        Reture:
+            tensor of flated capsule [bsize, h*w*n_capsule_channel, capsule_size]
+    """
     shape = x.get_shape().as_list()[1:-1]
     capsule_size = x.get_shape().as_list()[-1]
     if None not in shape:
@@ -17,7 +27,17 @@ def capsule_batch_flatten(x):
     return tf.reshape(x, tf.stack([tf.shape(x)[0], -1, capsule_size]))
 
 def squash(inputs, name='squash'):
-    # inputs [batch, h, w, dim]
+    """ squash nonlinearily (1) in "Dynamic Rounting between Capsules"
+        
+        Args:
+            inputs (tensor): input tensor. Dim of shape must be greater than 2.
+                The first dim is the batch and the last shape is the size of capsule.
+                [batch, h, w, capsule_size] or [batch, len, capsule_size]
+
+        Return:
+            squshed capsules with the same shape as inputs
+    """
+
     with tf.name_scope(name):
         s = inputs
         s_norm_2 = tf.reduce_sum(inputs ** 2, axis=-1, keepdims=True)
@@ -26,22 +46,35 @@ def squash(inputs, name='squash'):
         return v
 
 def shift(pose, pose_transform):
+    """ adjust pose by shifting """
     return pose + pose_transform
 
 def deform(pose, pose_transform):
+    """ adjust pose by affine transformation. Both inputs are 3x3 transformation matrix """
     return tf.matmul(pose, pose_transform)
 
-def reconstruct_capsule(inputs, num_recogition, num_generation, num_pose, pose_shift,
+def reconstruct_capsule(inputs, num_recognition, num_generation, num_pose, pose_shift,
                         transform_type,
                         wd=0, init_w=None, init_b=tf.zeros_initializer(), bn=False,
                         is_training=True, name='reconstruct_capsule'):
-    """
-        Capusule use in 'Transforming Auto-encoders'
+    """ Capsule use in 'Transforming Auto-encoders'.
+        This capsule reconstructs the transformed inputs based on pose_shift.
+        
+        Args:
+            inputs (tensor): input tensor [bsize, ...]
+            num_recognition (int): number of recognition unit
+            num_pose (int): number of pose unit
+            pose_shift (tensor): parameters for adjust pose [bsize, ...]
+            transform_type (str): type of transformation for pose.
+                'shift' - pose shift. 'affine' - affine transformation
+
+        Returns:
+            reconstruction of transformed inputs with the same shape as inputs
     """
     with tf.variable_scope(name):
         layer_dict = {'cur_input': inputs}
         recognition = L.linear(
-            out_dim=num_recogition, inputs=inputs,               
+            out_dim=num_recognition, inputs=inputs,               
             init_w=init_w, init_b=init_b, wd=wd, bn=bn,
             is_training=is_training, name='recognition', nl=tf.nn.relu)
         visual_prob = L.linear(
@@ -97,6 +130,22 @@ def reconstruct_capsule(inputs, num_recogition, num_generation, num_pose, pose_s
 def conv_capsule_wo_rounting(inputs, bsize, filter_size, stride, n_cap_channel, out_cap_size, 
                              init_w=None, init_b=tf.zeros_initializer(), wd=0,
                              is_training=True, name='conv_capsule_wo_rounting'):
+    """ Convolutional capsule without routing in "dynamic routing between capsules"
+        The output is a set of capsule grid. Each output channel shares the conv filter.
+
+        Args:
+            inputs (tensor): input tensor [bsize, ...]
+            bsize (int): batch size. Used for explicity define the shape of output
+            filter_size (int or list with len 2): size of conv filter
+            stride (int)
+            n_cap_channel (int): number of channels of output capsules
+            out_cap_size (int): size (dim) of output capsules
+
+        Returns:
+            output capsule tensors with size [bsize, h*w, n_cap_channel, out_cap_size].
+            h and w determined by the conv
+
+    """
     with tf.variable_scope(name):
         layer_dict = {}
         conv_out = L.conv(
@@ -115,15 +164,22 @@ def conv_capsule_wo_rounting(inputs, bsize, filter_size, stride, n_cap_channel, 
 def fc_capsule(inputs, bsize, n_routing, out_n_cap, out_cap_size,
                init_w=None, init_b=tf.zeros_initializer(), wd=0,
                is_training=True, name='fc_capsule'):
+    """ fully connected capsule layer with routing used in "dynamic routing between capsules"
+
+        Args:
+            inputs (tensor): input tensor [bsize, ...]
+            bsize (int): batch size. Used for initializing bij
+            n_routing (int): number of routing iteration
+            out_n_cap (int): number of output capsules
+            out_cap_size (int): size (dim) of output capsules
+
+        Returns:
+            tensor of output capsules [bsize, out_n_cap, out_cap_size]
+    """ 
     with tf.variable_scope(name):
         layer_dict = {}
         flatten_cap = capsule_batch_flatten(inputs)
         flatten_cap = tf.expand_dims(flatten_cap, axis=2) # [bsize, in_n_cap, 1, in_cap_size]
-
-        # pad_flatten_cap = tf.pad(
-        #     flatten_cap,
-        #     [[0, 0], [pad_size_1, pad_size_1], [pad_size_2, pad_size_2], [0, 0]],
-        #     "REFLECT")
 
         pred_vec_list = []
         in_n_cap = flatten_cap.get_shape().as_list()[1]
@@ -140,39 +196,8 @@ def fc_capsule(inputs, bsize, n_routing, out_n_cap, out_cap_size,
         flatten_cap_tile = tf.expand_dims(flatten_cap_tile, axis=3)
         pred_vec = tf.scan(lambda a, x: tf.matmul(x, wij), flatten_cap_tile,
             initializer=tf.zeros((in_n_cap, out_n_cap, 1, out_cap_size)))
-        # pred_vec = tf.matmul(flatten_cap_tile, wij, name='pred_vec')
-        pred_vec = tf.squeeze(pred_vec, axis=3)
-        # pred_vec = L.conv(
-        #     filter_size=[in_n_cap, out_n_cap], out_dim=out_cap_size, stride=1,
-        #     layer_dict=layer_dict, inputs=flatten_cap_tile, bn=False,
-        #     nl=tf.identity, init_w=init_w, use_bias=False, wd=wd,
-        #     padding='SAME', trainable=True, is_training=is_training,
-        #     name='pred_vec')
-
-        # for cap_id in range(out_n_cap):
-        #     uji = L.conv(
-        #         filter_size=[in_n_cap, 1], out_dim=out_cap_size, stride=1,
-        #         layer_dict=layer_dict, inputs=flatten_cap, bn=False,
-        #         nl=tf.identity, init_w=init_w, use_bias=False, wd=wd,
-        #         padding='SAME', trainable=True, is_training=is_training,
-        #         name='pred_vec_to_cap_{}'.format(cap_id))
-        #     pred_vec_list.append(uji)
-        # pred_vec = tf.stack(pred_vec_list, axis=2)
-        # pred_vec = tf.squeeze(pred_vec, axis=3) # uji matrix [bsize, in_n_cap, out_n_cap, out_cap_size]
-        # print(pred_vec)
+        pred_vec = tf.squeeze(pred_vec, axis=3) # [bsize, in_n_cap, out_n_cap, out_cap_size]
         
-        # in_n_cap = pred_vec.get_shape().as_list()[1]
-        # bij = tf.get_variable(
-        #     name='rounting_logits', shape=[bsize, in_n_cap, out_n_cap],
-        #     initializer=tf.zeros_initializer(), trainable=False)
-        # cij = tf.nn.softmax(bij, axis=-1) # [bsize, in_n_cap, out_n_cap]
-        # cij = tf.reshape(cij, shape=(bsize, in_n_cap, out_n_cap, 1)) # [bsize, in_n_cap, out_n_cap, 1]
-        # sj = tf.reduce_sum(cij * pred_vec, axis=1) # [bsize, out_n_cap, out_cap_size]
-        # vj = squash(sj) # [bsize, out_n_cap, out_cap_size]
-
-        # # agreement
-        # aij = tf.reduce_sum(pred_vec * tf.expand_dims(vj, axis=1), axis=-1)
-
         in_n_cap = pred_vec.get_shape().as_list()[1]
         bij = tf.zeros(shape=[bsize, in_n_cap, out_n_cap])
 
@@ -188,7 +213,7 @@ def fc_capsule(inputs, bsize, n_routing, out_n_cap, out_cap_size,
                     aij = tf.reduce_sum(pred_vec * tf.expand_dims(vj, axis=1), axis=-1)
                     bij += aij
 
-        return vj, bij, aij
+        return vj, bij
 
 
 

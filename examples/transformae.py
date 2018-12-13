@@ -11,9 +11,8 @@ import numpy as np
 import tensorflow as tf
 
 sys.path.append('../')
-
-from src.nets.transform_ae import TransformAE
 import loader as loader
+from src.nets.transform_ae import TransformAE
 
 SAVE_PATH = '/home/qge2/workspace/data/out/capsule/transform_ae/'
 MNIST_PATH = '/home/qge2/workspace/data/MNIST_data/'
@@ -30,7 +29,7 @@ def get_args():
 
     parser.add_argument('--load', type=int, default=99,
                         help='Load step of pre-trained')
-    parser.add_argument('--lr', type=float, default=2e-4,
+    parser.add_argument('--lr', type=float, default=0.001,
                         help='Init learning rate')
     parser.add_argument('--keep_prob', type=float, default=1.,
                         help='keep_prob')
@@ -57,8 +56,8 @@ def train():
         n_pose = 2
     elif FLAGS.transform == 'affine':
         n_capsule = 100
-        n_recogition = 100
-        n_generation = 100
+        n_recogition = 50
+        n_generation = 50
         n_pose = 9
 
     train_data, test_data = loader.load_mnist(FLAGS.bsize, data_path=MNIST_PATH)
@@ -82,13 +81,9 @@ def train():
         saver = tf.train.Saver()
         sess.run(tf.global_variables_initializer())
         writer.add_graph(sess.graph)
+        lr = FLAGS.lr
         for epoch_id in range(FLAGS.maxepoch):
-            if epoch_id > 50:
-                lr = FLAGS.lr / 2.
-            elif epoch_id > 100:
-                lr = FLAGS.lr / 10.
-            else:
-                lr = FLAGS.lr
+            lr = lr * 0.95
             train_model.train_epoch(
                 sess, train_data, lr, summary_writer=writer)
             valid_model.valid_epoch(sess, test_data, summary_writer=writer)

@@ -115,7 +115,7 @@ class MNISTData(object):
                     im_list.append(self._pf(im))
 
         self.im_list = np.array(im_list)
-        self.label_list = np.array(label_list)
+        self.label_list = np.array(np.expand_dims(label_list, axis=-1))
 
         if n_use_label is not None and n_use_label < self.size():
             remain_sample = n_use_label // 10 * 10
@@ -237,7 +237,8 @@ class MNISTPair(MNISTData):
             batch_files.append(im)
 
             # label = self._label_dict['{}{}'.format(label_1, label_2)]
-            label = [label_1, label_2] if label_1 < label_2 else [label_2, label_1]
+            label = np.concatenate((label_1, label_2)) if label_2 < label_1\
+                else np.concatenate((label_2, label_1))
             batch_label.append(label)
             start = start + 2
         end = start

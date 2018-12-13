@@ -31,8 +31,8 @@ def translate_image(input_im, trans_im_size, o_im_size, shift_range=None):
             min_h, max_h = shift_range[0]
             min_w, max_w = shift_range[1]
         else:
-            min_h, max_h = -offset_h, offset_h
-            min_w, max_w = -offset_w, offset_w
+            min_h, max_h = -offset_h-5, offset_h+5
+            min_w, max_w = -offset_w-5, offset_w+5
 
         bsize = tf.shape(input_im)[0]
         trans_h = tf.random_uniform(

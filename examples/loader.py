@@ -65,7 +65,7 @@ def load_mnist(batch_size, data_path, shuffle=True, n_use_label=None, n_use_samp
     test_data.setup(epoch_val=0, batch_size=batch_size)
     return train_data, test_data
 
-def put_two_image(im_1, im_2, im_size, canvas_size):
+def put_two_image(im_1, im_2, im_size, canvas_size, center_off=0):
     pad_h_1 = int(np.floor((canvas_size - im_size) / 2.))
     pad_h_2 = canvas_size - im_size - pad_h_1
     pad_w_1 = int(np.floor((canvas_size - im_size) / 2.))
@@ -80,8 +80,16 @@ def put_two_image(im_1, im_2, im_size, canvas_size):
 
     off_h = pad_h_1 + 5
     off_w = pad_w_1 + 5
-    trans_h = np.random.random(1) * 2. * off_h - off_h
-    trans_w = np.random.random(1) * 2. * off_w - off_w
+
+    trans_h = np.random.random(1) * (off_h - center_off) + center_off
+    trans_w = np.random.random(1) * (off_w - center_off) + center_off
+    if np.random.random(1) > 0.5:
+        trans_h = -trans_h
+    if np.random.random(1) > 0.5:
+        trans_w = -trans_w
+
+    # trans_h = np.random.random(1) * 2. * off_h - off_h
+    # trans_w = np.random.random(1) * 2. * off_w - off_w
 
     trans_1 = scipy.ndimage.interpolation.shift(pad_im_1, (trans_h, trans_w))
     trans_2 = scipy.ndimage.interpolation.shift(pad_im_2, (-trans_h, -trans_w))
@@ -98,7 +106,9 @@ def two_digits_mnist(canvas_size, batch_size=128):
         data_path = 'E:/Dataset/MNIST/'
 
     def two_digits(im_1, im_2):
-        return put_two_image(im_1, im_2, im_size=28, canvas_size=canvas_size)
+        im = put_two_image(im_1, im_2, im_size=28, canvas_size=canvas_size, center_off=5)
+        im = im / 255.
+        return np.clip(im, 0., 1.)
 
     label_dict = {}
     label_id = 0
@@ -161,12 +171,13 @@ def two_digits_mnist(canvas_size, batch_size=128):
 if __name__ == '__main__':
     import matplotlib.pyplot as plt
         
-    data, _ = two_digits_mnist(canvas_size=45, batch_size=1)
+    data, _ = two_digits_mnist(canvas_size=40, batch_size=1)
     batch_data = data.next_batch_dict()
 
     cur_im = np.squeeze(batch_data['im'][0])
-    cur_im = ((cur_im + 1) * 255 / 2)
-    cur_im = cur_im.astype(np.uint8)
+    print(cur_im.shape)
+    # cur_im = ((cur_im + 1) * 255 / 2)
+    # cur_im = cur_im.astype(np.uint8)
 
     print(batch_data['label'][0])
 
