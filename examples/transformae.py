@@ -26,6 +26,8 @@ def get_args():
 
     parser.add_argument('--dataset', type=str, default='mnist',
                         help='Dataset used for experiment.')
+    parser.add_argument('--folder', type=str, default='test',
+                        help='Folder for saving.')
 
     parser.add_argument('--load', type=int, default=99,
                         help='Load step of pre-trained')
@@ -45,8 +47,6 @@ def get_args():
 
 def train():
     FLAGS = get_args()
-    save_path = SAVE_PATH
-
     transform_type = FLAGS.transform
 
     if FLAGS.transform == 'shift':
@@ -59,6 +59,9 @@ def train():
         n_recogition = 50
         n_generation = 50
         n_pose = 9
+
+    save_path = os.path.join(SAVE_PATH, transform_type, FLAGS.folder)
+    save_path = save_path + '/'
 
     train_data, test_data = loader.load_mnist(FLAGS.bsize, data_path=MNIST_PATH)
     im_size = 28
@@ -90,11 +93,48 @@ def train():
             saver.save(sess, '{}transformae-epoch-{}'.format(save_path, epoch_id))
         saver.save(sess, '{}transformae-epoch-{}'.format(save_path, epoch_id))
 
+def test():
+    FLAGS = get_args()
+    transform_type = FLAGS.transform
+
+    if FLAGS.transform == 'shift':
+        n_capsule = 30
+        n_recogition = 10
+        n_generation = 20
+        n_pose = 2
+    elif FLAGS.transform == 'affine':
+        n_capsule = 100
+        n_recogition = 50
+        n_generation = 50
+        n_pose = 9
+
+    save_path = os.path.join(SAVE_PATH, transform_type, FLAGS.folder)
+    save_path = save_path + '/'
+
+    train_data, test_data = loader.load_mnist(FLAGS.bsize, data_path=MNIST_PATH, shuffle=True)
+    im_size = 28
+    n_channels = 1
+
+    test_model = TransformAE(
+        im_size, n_channels, n_capsule, n_recogition, n_generation, n_pose, transform_type)
+    test_model.create_valid_model()
+
+    sessconfig = tf.ConfigProto()
+    sessconfig.gpu_options.allow_growth = True
+    with tf.Session(config=sessconfig) as sess:
+        writer = tf.summary.FileWriter(save_path)
+        saver = tf.train.Saver()
+        sess.run(tf.global_variables_initializer())
+        saver.restore(sess, '{}transformae-epoch-{}'.format(save_path, FLAGS.load))
+        test_model.viz_batch_test(sess, test_data, n_test=1, save_path=save_path)
+
+
 if __name__ == "__main__":
     FLAGS = get_args()
-
     if FLAGS.train:
         train()
+    if FLAGS.test:
+        test()
 
 
 

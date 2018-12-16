@@ -3,6 +3,7 @@
 # File: transform_ae.py
 # Author: Qian Ge <geqian1001@gmail.com>
 
+import os
 import numpy as np
 import tensorflow as tf
 
@@ -61,6 +62,8 @@ class TransformAE(BaseModel):
             T = self.pose_shift[:, :-3]
             T = tf.reshape(T, (-1, 2, 3))
             self.label = spatial_transformer(self.image, T, out_dim=None)
+        else:
+            raise ValueError("Unkonwn transform type: {}".format(self.transform_type))
 
         self.lr = tf.placeholder(tf.float32, name='lr')
 
@@ -68,7 +71,7 @@ class TransformAE(BaseModel):
         """ create graph for training """
         self.set_is_training(True)
         self._create_train_input()
-        self.layers['pred'] = self._create_model(self.image, self.pose_shift)
+        self.layers['pred'], _, _ = self._create_model(self.image, self.pose_shift)
 
         self.train_op = self.get_train_op()
         self.loss_op = self.get_loss()
@@ -98,7 +101,7 @@ class TransformAE(BaseModel):
         """ create graph for validation """
         self.set_is_training(False)
         self._create_valid_input()
-        self.layers['pred'] = self._create_model(self.image, self.pose_shift)
+        self.layers['pred'], self.layers['pose'], self.layers['visual_prob'] = self._create_model(self.image, self.pose_shift)
 
         self.loss_op = self.get_loss()
         self.valid_summary_op = self.get_valid_summary()
@@ -108,8 +111,10 @@ class TransformAE(BaseModel):
         """ create the transform autoencoder """
         with tf.variable_scope('transforming_AE', reuse=tf.AUTO_REUSE):
             cap_out = []
+            pose_list = []
+            visual_prob_list = []
             for capsule_id in range(self.n_capsule):
-                out = capsule_module.reconstruct_capsule(
+                out, pose, visual_prob = capsule_module.reconstruct_capsule(
                     inputs=inputs, num_recognition=self.n_recognition,
                     num_generation=self.n_generation,
                     num_pose=self.n_pose, pose_shift=pose_shift,
@@ -117,9 +122,11 @@ class TransformAE(BaseModel):
                     transform_type=self.transform_type,
                     is_training=self.is_training, name='capsule_{}'.format(capsule_id))
                 cap_out.append(out)
+                pose_list.append(pose)
+                visual_prob_list.append(visual_prob)
             cap_out = tf.add_n(cap_out)
 
-            return tf.nn.sigmoid(cap_out)
+            return tf.nn.sigmoid(cap_out), pose_list, visual_prob_list
 
     def _get_loss(self):
         """ compute the reconstruction loss """
@@ -268,3 +275,61 @@ class TransformAE(BaseModel):
             'valid',
             summary_val=cur_summary,
             summary_writer=summary_writer)
+
+    def viz_batch_test(self, sess, test_data, n_test, save_path, test_type='pose'):
+        """ visualize a batch of test data """
+        test_data.setup(epoch_val=0, batch_size=n_test)
+
+        if test_type == 'reconstruct':
+            batch_data = test_data.next_batch_dict()
+            im = batch_data['im']
+
+            # generate random transformation
+            if self.transform_type == 'shift':
+                pose_shift = transformation.gen_pose_shift(n_test, self.n_pose)
+            elif self.transform_type == 'affine':
+                pose_shift = transformation.gen_affine_trans(n_test)
+
+            pred, gt = sess.run(
+                    [self.layers['pred'], self.label], 
+                    feed_dict={self.image: im,
+                               self.pose_shift: pose_shift})
+            batch_im = np.concatenate((im, gt, pred), axis=0)
+            # batch_im = np.concatenate((batch_im, pred), axis=0)
+            viz.viz_batch_im(batch_im, [3, n_test], os.path.join(save_path, 'test.png'),
+                gap=0, gap_color=0, shuffle=False)
+
+        elif test_type == 'pose':
+            assert self.transform_type == 'shift'
+
+            trans_h = tf.ones(n_test, 1) 
+            trans_w = tf.zeros(n_test, 1) 
+            translations_1 = tf.concat((2. * trans_h, trans_w), axis=-1)
+            trans_im_1 = tf.contrib.image.translate(
+                self.image, translations_1, interpolation='NEAREST')
+            translations_2 = tf.concat((-2. * trans_h, trans_w), axis=-1)
+            trans_im_2 = tf.contrib.image.translate(
+                self.image, translations_2, interpolation='NEAREST')
+
+            batch_data = test_data.next_batch_dict()
+            im = batch_data['im']
+
+            pose, prob = sess.run([self.layers['pose'], self.layers['visual_prob']], feed_dict={self.image: im})
+            shift_im = sess.run(trans_im_1, feed_dict={self.image: im})
+            pose_1, prob_1 = sess.run([self.layers['pose'], self.layers['visual_prob']], feed_dict={self.image: shift_im})
+            shift_im = sess.run(trans_im_2, feed_dict={self.image: im})
+            pose_2, prob_2 = sess.run([self.layers['pose'], self.layers['visual_prob']], feed_dict={self.image: shift_im})
+
+            # print(np.array(pose))
+            print((np.array(pose_1)-np.array(pose))[0])
+            # print(prob)
+            # print(prob_1)
+            # # print(np.array(pose_2))
+            # import imageio
+            # imageio.imwrite(os.path.join(save_path, 'test1.png'), np.squeeze(im))
+            # imageio.imwrite(os.path.join(save_path, 'test2.png'), np.squeeze(shift_im))
+            
+            
+        else:
+            raise ValueError("Unkonwn test type: {}".format(test_type))
+

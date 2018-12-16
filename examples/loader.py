@@ -15,7 +15,7 @@ sys.path.append('../')
 from src.dataflow.mnist import MNISTData, MNISTPair
 
 
-def load_mnist(batch_size, data_path, shuffle=True, n_use_label=None, n_use_sample=None,
+def load_mnist(batch_size, data_path, shuffle=False, n_use_label=None, n_use_sample=None,
                rescale_size=None):
     """ Function for load training data 
 
@@ -47,7 +47,7 @@ def load_mnist(batch_size, data_path, shuffle=True, n_use_label=None, n_use_samp
     train_data = MNISTData(
         'train',
          data_dir=data_path,
-         shuffle=shuffle,
+         shuffle=True,
          pf=preprocess_im,
          n_use_label=n_use_label,
          n_use_sample=n_use_sample,
@@ -57,7 +57,7 @@ def load_mnist(batch_size, data_path, shuffle=True, n_use_label=None, n_use_samp
     test_data = MNISTData(
         'test',
          data_dir=data_path,
-         shuffle=False,
+         shuffle=shuffle,
          pf=preprocess_im,
          n_use_label=n_use_label,
          n_use_sample=n_use_sample,

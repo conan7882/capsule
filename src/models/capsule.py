@@ -108,7 +108,7 @@ def reconstruct_capsule(inputs, num_recognition, num_generation, num_pose, pose_
 
         out = tf.multiply(out, visual_prob)
         out = tf.reshape(out, shape=[-1, input_shape[1], input_shape[2], input_shape[3]])
-        return out
+        return out, pose, visual_prob
 
 # def conv_capsule_wo_rounting(inputs, bsize, filter_size, stride, n_cap_channel, out_cap_size, 
 #                              init_w=None, init_b=tf.zeros_initializer(), wd=0,

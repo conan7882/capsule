@@ -48,6 +48,7 @@ def viz_batch_im(batch_im, grid_size, save_path,
         merge_im[j * (h + gap) + gap: j * (h + gap) + h + gap,
                  i * (w + gap) + gap: i * (w + gap) + w + gap, :]\
             = (cur_im)
+
     imageio.imwrite(save_path, np.squeeze(merge_im))
 
 def display(global_step,
