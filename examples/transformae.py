@@ -15,7 +15,13 @@ import loader as loader
 from src.nets.transform_ae import TransformAE
 
 SAVE_PATH = '/home/qge2/workspace/data/out/capsule/transform_ae/'
-MNIST_PATH = '/home/qge2/workspace/data/MNIST_data/'
+# MNIST_PATH = '/home/qge2/workspace/data/MNIST_data/'
+if platform.node() == 'arostitan':
+    MNIST_PATH = '/home/qge2/workspace/data/MNIST_data/'
+elif platform.node() == 'Qians-MacBook-Pro.local':
+    MNIST_PATH = '/Users/gq/workspace/Dataset/MNIST_data/'
+else:
+    MNIST_PATH = 'E:/Dataset/MNIST/'
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -98,6 +104,11 @@ def test():
     transform_type = FLAGS.transform
 
     if FLAGS.transform == 'shift':
+        # n_capsule = 30
+        # n_recogition = 10
+        # n_generation = 20
+        # n_pose = 2
+
         n_capsule = 30
         n_recogition = 10
         n_generation = 20
@@ -110,6 +121,7 @@ def test():
 
     save_path = os.path.join(SAVE_PATH, transform_type, FLAGS.folder)
     save_path = save_path + '/'
+    save_path = 'E:/tmp/capsule/'
 
     train_data, test_data = loader.load_mnist(FLAGS.bsize, data_path=MNIST_PATH, shuffle=True)
     im_size = 28
@@ -126,7 +138,7 @@ def test():
         saver = tf.train.Saver()
         sess.run(tf.global_variables_initializer())
         saver.restore(sess, '{}transformae-epoch-{}'.format(save_path, FLAGS.load))
-        test_model.viz_batch_test(sess, test_data, n_test=1, save_path=save_path)
+        test_model.viz_batch_test(sess, test_data, n_test=100, save_path=save_path)
 
 
 if __name__ == "__main__":

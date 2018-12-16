@@ -15,7 +15,7 @@ import src.models.transformation as transformation
 from src.models.transformer import spatial_transformer
 
 
-INIT_W = tf.random_normal_initializer(stddev=0.02)
+INIT_W = tf.random_normal_initializer(stddev=0.2)
 # INIT_W = tf.keras.initializers.he_normal()
 
 class TransformAE(BaseModel):
@@ -71,7 +71,7 @@ class TransformAE(BaseModel):
         """ create graph for training """
         self.set_is_training(True)
         self._create_train_input()
-        self.layers['pred'], _, _ = self._create_model(self.image, self.pose_shift)
+        self.layers['pred'], _, _, _ = self._create_model(self.image, self.pose_shift)
 
         self.train_op = self.get_train_op()
         self.loss_op = self.get_loss()
@@ -101,7 +101,8 @@ class TransformAE(BaseModel):
         """ create graph for validation """
         self.set_is_training(False)
         self._create_valid_input()
-        self.layers['pred'], self.layers['pose'], self.layers['visual_prob'] = self._create_model(self.image, self.pose_shift)
+        self.layers['pred'], self.layers['pose'], self.layers['visual_prob'], self.layers['transferred_pose']\
+            = self._create_model(self.image, self.pose_shift)
 
         self.loss_op = self.get_loss()
         self.valid_summary_op = self.get_valid_summary()
@@ -112,9 +113,11 @@ class TransformAE(BaseModel):
         with tf.variable_scope('transforming_AE', reuse=tf.AUTO_REUSE):
             cap_out = []
             pose_list = []
+            transferred_pose_list = []
             visual_prob_list = []
+
             for capsule_id in range(self.n_capsule):
-                out, pose, visual_prob = capsule_module.reconstruct_capsule(
+                out, pose, visual_prob, transferred_pose = capsule_module.reconstruct_capsule(
                     inputs=inputs, num_recognition=self.n_recognition,
                     num_generation=self.n_generation,
                     num_pose=self.n_pose, pose_shift=pose_shift,
@@ -124,9 +127,17 @@ class TransformAE(BaseModel):
                 cap_out.append(out)
                 pose_list.append(pose)
                 visual_prob_list.append(visual_prob)
+                transferred_pose_list.append(transferred_pose)
             cap_out = tf.add_n(cap_out)
 
-            return tf.nn.sigmoid(cap_out), pose_list, visual_prob_list
+            # input_shape = inputs.get_shape().as_list()
+            # input_dim = input_shape[1] * input_shape[2] * input_shape[3]
+            # out = L.linear(
+            #     out_dim=input_dim, inputs=cap_out,               
+            #     init_w=INIT_W, wd=0, bn=False,
+            #     is_training=self.is_training, name='out', nl=tf.identity)
+            # out = tf.reshape(out, shape=[-1, input_shape[1], input_shape[2], input_shape[3]])
+            return tf.nn.sigmoid(cap_out), pose_list, visual_prob_list, transferred_pose_list
 
     def _get_loss(self):
         """ compute the reconstruction loss """
@@ -302,32 +313,67 @@ class TransformAE(BaseModel):
         elif test_type == 'pose':
             assert self.transform_type == 'shift'
 
-            trans_h = tf.ones(n_test, 1) 
-            trans_w = tf.zeros(n_test, 1) 
-            translations_1 = tf.concat((2. * trans_h, trans_w), axis=-1)
+            trans_h = tf.ones([n_test, 1]) 
+            trans_w = tf.zeros([n_test, 1]) 
+            translations_1 = tf.concat((3. * trans_h, trans_w), axis=-1)
             trans_im_1 = tf.contrib.image.translate(
                 self.image, translations_1, interpolation='NEAREST')
-            translations_2 = tf.concat((-2. * trans_h, trans_w), axis=-1)
+            translations_2 = tf.concat((-3. * trans_h, trans_w), axis=-1)
             trans_im_2 = tf.contrib.image.translate(
                 self.image, translations_2, interpolation='NEAREST')
+
+            trans_h = np.ones([n_test, 1]) 
+            trans_w = np.zeros([n_test, 1]) 
+            translations_1 = np.concatenate((3. * trans_h, trans_w), axis=-1)
+            translations_2 = np.concatenate((-3. * trans_h, trans_w), axis=-1)
+
+            # print(trans_h, trans_w)
+            # print(translations_1)
 
             batch_data = test_data.next_batch_dict()
             im = batch_data['im']
 
-            pose, prob = sess.run([self.layers['pose'], self.layers['visual_prob']], feed_dict={self.image: im})
+            pose_shift = transformation.gen_pose_shift(n_test, self.n_pose)
+
+            pose, prob, transferred_pose, pred_o = sess.run(
+                [self.layers['pose'], self.layers['visual_prob'], self.layers['transferred_pose'], self.layers['pred']],
+                feed_dict={self.image: im, self.pose_shift: translations_1})
             shift_im = sess.run(trans_im_1, feed_dict={self.image: im})
-            pose_1, prob_1 = sess.run([self.layers['pose'], self.layers['visual_prob']], feed_dict={self.image: shift_im})
+            pose_1, prob_1, pred = sess.run(
+                [self.layers['pose'], self.layers['visual_prob'], self.layers['pred']],
+                feed_dict={self.image: shift_im, self.pose_shift: np.zeros([n_test, 2])})
+
+            # pose_t, prob_t, pred_t = sess.run(
+            #     [self.layers['pose'], self.layers['visual_prob'], self.layers['pred']],
+            #     feed_dict={self.image: im, self.pose_shift: [[3,0]]})
             shift_im = sess.run(trans_im_2, feed_dict={self.image: im})
             pose_2, prob_2 = sess.run([self.layers['pose'], self.layers['visual_prob']], feed_dict={self.image: shift_im})
 
+            pose_0_list = [ele[0] for ele in pose[:][0]]
+            pose_1_list = [ele[0] for ele in pose_1[:][0]]
+            pose_2_list = [ele[0] for ele in pose_2[:][0]]
+            # print(pose_0_list, pose_1_list)
+            import matplotlib.pyplot as plt
+            plt.figure()
+            plt.plot(pose_0_list, pose_1_list, 'o')
+            plt.plot(pose_0_list, pose_2_list, 'o')
+            plt.axis('equal')
+            plt.show()
             # print(np.array(pose))
-            print((np.array(pose_1)-np.array(pose))[0])
+            # print([np.ndarray.tolist(ele) for ele in pose])
+            # print('======================== {} ================='.format(translations_1))
+            # print([np.ndarray.tolist(ele) for ele in pose_1])
+            # print('---------------')
+            # print([np.ndarray.tolist(ele1-ele2) for ele1, ele2 in zip(pose_1, pose)])
             # print(prob)
             # print(prob_1)
             # # print(np.array(pose_2))
             # import imageio
-            # imageio.imwrite(os.path.join(save_path, 'test1.png'), np.squeeze(im))
-            # imageio.imwrite(os.path.join(save_path, 'test2.png'), np.squeeze(shift_im))
+            # for i in range(10):
+            #     imageio.imwrite(os.path.join(save_path, '{}_input.png'.format(i)), np.squeeze(im[i]))
+            #     imageio.imwrite(os.path.join(save_path, '{}_shift_input.png'.format(i)), np.squeeze(shift_im[i]))
+            #     imageio.imwrite(os.path.join(save_path, '{}_shift_re.png'.format(i)), np.squeeze(pred[i]))
+            #     imageio.imwrite(os.path.join(save_path, '{}_shift_from_o.png'.format(i)), np.squeeze(pred_o[i]))
             
             
         else:
