@@ -17,8 +17,11 @@ class BaseModel(object):
         try:
             return self._loss
         except AttributeError:
-            self._loss = self._get_loss()
-        return self._loss
+            loss = self._get_loss()
+            reg_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
+            self._loss = loss + tf.reduce_sum(reg_losses)
+            # loss = tf.add_n(tf.get_collection('losses') + tf.get_collection('tf.GraphKeys.REGULARIZATION_LOSSES'), name='total_loss')
+            return self._loss
 
     def _get_loss(self):
         raise NotImplementedError()

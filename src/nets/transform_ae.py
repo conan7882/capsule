@@ -7,23 +7,22 @@ import os
 import numpy as np
 import tensorflow as tf
 
-from src.nets.base import BaseModel
 import src.utils.viz as viz
 import src.models.layers as L
+from src.nets.base import BaseModel
 import src.models.capsule as capsule_module
 import src.models.transformation as transformation
-from src.dataflow.tfprocess import translate_image
-from src.models.transformer import spatial_transformer
+from src.models.tftransformer import spatial_transformer, translate_image
 
 
-INIT_W = tf.random_normal_initializer(stddev=0.02)
+INIT_W = tf.random_normal_initializer(stddev=0.002)
 # INIT_W = tf.keras.initializers.he_normal()
 
 class TransformAE(BaseModel):
     """ class for transforming autoencoder from "Transforming Auto-encoders" """
     def __init__(self, im_size, n_channels, n_capsule,
                  n_recognition, n_generation, n_pose, transform_type,
-                 translate_input=False):
+                 wd=0, translate_input=False):
         """
         Args:
             im_size (int or list with length 2): size of generate image 
@@ -46,6 +45,7 @@ class TransformAE(BaseModel):
         self.n_pose = n_pose
         self.transform_type = transform_type
         self.translate_input = translate_input
+        self.wd = wd
 
         self.layers = {}
 
@@ -96,7 +96,8 @@ class TransformAE(BaseModel):
         self.epoch_id = 0
 
     def  _create_valid_input(self):
-        self.raw_pose_shift = tf.placeholder(tf.float32, [None, self.n_pose], name='pose_shift')
+        self.raw_pose_shift = tf.placeholder(
+            tf.float32, [None, self.n_pose], name='pose_shift')
         self.raw_image = tf.placeholder(
             tf.float32, [None, self.im_h, self.im_w, self.n_channels],
             name='image')
@@ -129,7 +130,8 @@ class TransformAE(BaseModel):
         """ create graph for validation """
         self.set_is_training(False)
         self._create_valid_input()
-        self.layers['pred'], self.layers['pose'], self.layers['visual_prob'], self.layers['transferred_pose'], self.layers['out_weights']\
+        self.layers['pred'], self.layers['pose'], self.layers['visual_prob'],\
+        self.layers['transferred_pose'], self.layers['out_weights']\
             = self._create_model(self.image, self.pose_shift)
 
         self.loss_op = self.get_loss()
@@ -150,7 +152,7 @@ class TransformAE(BaseModel):
                     inputs=inputs, num_recognition=self.n_recognition,
                     num_generation=self.n_generation,
                     num_pose=self.n_pose, pose_shift=pose_shift,
-                    wd=0, init_w=INIT_W, bn=False,
+                    wd=self.wd, init_w=INIT_W, bn=False,
                     transform_type=self.transform_type,
                     is_training=self.is_training, name='capsule_{}'.format(capsule_id))
                 cap_out.append(out)
@@ -160,13 +162,6 @@ class TransformAE(BaseModel):
                 out_weights_list.append(out_weights)
             cap_out = tf.add_n(cap_out)
 
-            # input_shape = inputs.get_shape().as_list()
-            # input_dim = input_shape[1] * input_shape[2] * input_shape[3]
-            # out = L.linear(
-            #     out_dim=input_dim, inputs=cap_out,               
-            #     init_w=INIT_W, wd=0, bn=False,
-            #     is_training=self.is_training, name='out', nl=tf.identity)
-            # out = tf.reshape(out, shape=[-1, input_shape[1], input_shape[2], input_shape[3]])
             return tf.nn.sigmoid(cap_out), pose_list, visual_prob_list, transferred_pose_list, out_weights_list
 
     def _get_loss(self):
@@ -175,6 +170,7 @@ class TransformAE(BaseModel):
             label = self.label
             prediction = self.layers['pred']
             loss = tf.reduce_sum((label - prediction) ** 2, axis=[1,2,3])
+            # tf.add_to_collection('losses', loss)
             return tf.reduce_mean(loss)
 
     def _get_optimizer(self):
@@ -317,15 +313,10 @@ class TransformAE(BaseModel):
             summary_val=cur_summary,
             summary_writer=summary_writer)
 
-    def viz_filter(self, sess, save_path):
-        weights = sess.run(self.layers['out_weights'])
-        for i in range(self.n_capsule):
-            viz.viz_batch_im(
-                weights[i], [4, 5], os.path.join(save_path, 'filter_{}.png'.format(i)),
-                gap=0, gap_color=0, shuffle=False)
-
     def viz_batch_test(self, sess, test_data, n_test, save_path, test_type='pose'):
         """ visualize a batch of test data """
+        if test_type == 'single_pose':
+            n_test = 1
         test_data.setup(epoch_val=0, batch_size=n_test)
 
         if test_type == 'reconstruct':
@@ -344,75 +335,105 @@ class TransformAE(BaseModel):
                                self.raw_pose_shift: pose_shift})
             batch_im = np.concatenate((im, gt, pred), axis=0)
             # batch_im = np.concatenate((batch_im, pred), axis=0)
-            viz.viz_batch_im(batch_im, [3, n_test], os.path.join(save_path, 'reconstruct_{}.png'.format(self.transform_type)),
+            viz.viz_batch_im(
+                batch_im, [3, n_test],
+                os.path.join(save_path, 'reconstruct_{}.png'.format(self.transform_type)),
                 gap=0, gap_color=0, shuffle=False)
 
-        elif test_type == 'pose':
-            assert self.transform_type == 'shift'
-            shift_val = 3.
-
-            trans_h = tf.ones([n_test, 1]) 
-            trans_w = tf.zeros([n_test, 1]) 
-            translations_1 = tf.concat((shift_val * trans_h, trans_w), axis=-1)
-            trans_im_1 = tf.contrib.image.translate(
-                self.raw_image, translations_1, interpolation='NEAREST')
-            translations_2 = tf.concat((-shift_val * trans_h, trans_w), axis=-1)
-            trans_im_2 = tf.contrib.image.translate(
-                self.raw_image, translations_2, interpolation='NEAREST')
-
-            batch_data = test_data.next_batch_dict()
-            im = batch_data['im']
-
-            pose_shift = transformation.gen_pose_shift(n_test, self.n_pose)
-
-            pose, prob = sess.run(
-                [self.layers['pose'], self.layers['visual_prob']],
-                feed_dict={self.raw_image: im})
-
-            shift_im = sess.run(trans_im_1, feed_dict={self.raw_image: im})
-            pose_1, prob_1 = sess.run(
-                [self.layers['pose'], self.layers['visual_prob']],
-                feed_dict={self.raw_image: shift_im})
-
-            shift_im = sess.run(trans_im_2, feed_dict={self.raw_image: im})
-            pose_2, prob_2 = sess.run(
-                [self.layers['pose'], self.layers['visual_prob']],
-                feed_dict={self.raw_image: shift_im})
-
-            import matplotlib.pyplot as plt
-            from mpl_toolkits.mplot3d import axes3d, Axes3D
-
-            # mean_pro = np.mean(prob, axis=1)
-            # mean_pro_1 = np.mean(prob_1, axis=1)
-            # mean_pro_2 = np.mean(prob_2, axis=1)
-            # plt.figure()
-            # plt.plot(mean_pro, 'o-')
-            # plt.plot(mean_pro_1, 'o-')
-            # plt.plot(mean_pro_2, 'o-')
-            # plt.show()
-
-
-
+        elif test_type == 'filter':
+            weights = sess.run(self.layers['out_weights'])
             for i in range(self.n_capsule):
-                pose_0_list = [ele[0] for ele in pose[i]]
-                pose_1_list = [ele[0] for ele in pose_1[i]]
-                pose_2_list = [ele[0] for ele in pose_2[i]]
-                # prob_list = [ele[0] for ele in prob[i]]
-                # # print(pose_0_list)
-                fig = plt.figure()
-                # ax = Axes3D(fig)
-                # ax.scatter(pose_0_list, pose_1_list, prob_list, c='C1', marker='o')
-                plt.plot(pose_1_list, pose_0_list, 'o', color='C1')
-                plt.plot(pose_2_list, pose_0_list, 'o', color='C2')
-                plt.plot(pose_0_list - shift_val * np.ones(n_test), pose_0_list, color='C2')
-                plt.plot(pose_0_list + shift_val * np.ones(n_test), pose_0_list, color='C1')
-                plt.axis('equal')
+                viz.viz_batch_im(
+                    weights[i], [2, 10], os.path.join(save_path, 'filter_{}.png'.format(i)),
+                    gap=0, gap_color=0, shuffle=False)
 
-                # plt.figure()
-                # plt.plot(pose_0_list, prob_list, 'o', color='C1')
-                # plt.show()
-                fig.savefig(os.path.join(save_path, '{}_x_output.png'.format(i)), dpi=fig.dpi)
-            
+        elif test_type == 'pose' or test_type == 'single_pose':
+            import matplotlib.pyplot as plt
+
+            if self.transform_type == 'affine':
+                batch_data = test_data.next_batch_dict()
+                im = batch_data['im']
+                pose, prob = sess.run(
+                    [self.layers['pose'], self.layers['visual_prob']],
+                    feed_dict={self.raw_image: im})
+
+                mean_pro = np.mean(prob, axis=1)
+                fig = plt.figure()
+                plt.plot(mean_pro, 'o-')
+                plt.xlabel("Capsules")
+                plt.ylabel("Probability")
+                plt.grid()
+                # plt.xlim(-5, self.n_capsule + 1) 
+                fig.savefig(os.path.join(save_path, 'prob.png'), dpi=fig.dpi)
+            else:
+                shift_val = 3.
+                trans_h = tf.ones([n_test, 1]) 
+                trans_w = tf.zeros([n_test, 1]) 
+                translations_1 = tf.concat((shift_val * trans_h, trans_w), axis=-1)
+                trans_im_1 = tf.contrib.image.translate(
+                    self.raw_image, translations_1, interpolation='NEAREST')
+                translations_2 = tf.concat((-shift_val * trans_h, trans_w), axis=-1)
+                trans_im_2 = tf.contrib.image.translate(
+                    self.raw_image, translations_2, interpolation='NEAREST')
+
+                batch_data = test_data.next_batch_dict()
+                im = batch_data['im']
+                pose, prob = sess.run(
+                    [self.layers['pose'], self.layers['visual_prob']],
+                    feed_dict={self.raw_image: im})
+
+                shift_im = sess.run(trans_im_1, feed_dict={self.raw_image: im})
+                pose_1, prob_1 = sess.run(
+                    [self.layers['pose'], self.layers['visual_prob']],
+                    feed_dict={self.raw_image: shift_im})
+
+                shift_im = sess.run(trans_im_2, feed_dict={self.raw_image: im})
+                pose_2, prob_2 = sess.run(
+                    [self.layers['pose'], self.layers['visual_prob']],
+                    feed_dict={self.raw_image: shift_im})
+
+                if test_type == 'single_pose':
+                    plt.figure()
+                    plt.bar(range(self.n_capsule), prob)
+                    diff_1 = [(p_1[0] - p_0[0])[0] for p_0, p_1 in zip(pose, pose_1)]
+                    diff_2 = [(p_2[0] - p_0[0])[0] for p_0, p_2 in zip(pose, pose_2)]
+                    fig = plt.figure()
+                    plt.plot(diff_1, 'o')
+                    plt.plot(diff_2, 'o')
+                    plt.plot(shift_val * np.ones(len(diff_1)))
+                    plt.plot(-shift_val * np.ones(len(diff_1)))
+                    plt.show()
+
+                else:
+                    mean_pro = np.mean(prob, axis=1)
+                    mean_pro_1 = np.mean(prob_1, axis=1)
+                    mean_pro_2 = np.mean(prob_2, axis=1)
+                    fig = plt.figure()
+                    plt.plot(mean_pro, 'o-')
+                    plt.plot(mean_pro_1, 'o-')
+                    plt.plot(mean_pro_2, 'o-')
+                    plt.xlabel("Capsules")
+                    plt.ylabel("Probability")
+                    plt.grid()
+                    plt.xlim(-5, self.n_capsule + 1) 
+                    plt.legend(['Original', 'Shift +{} pixel'.format(shift_val), 'Shift -{} pixel'.format(shift_val)], loc='upper left')
+                    fig.savefig(os.path.join(save_path, 'prob.png'), dpi=fig.dpi) 
+
+                    for i in range(self.n_capsule):
+                        pose_0_list = [ele[0] for ele in pose[i]]
+                        pose_1_list = [ele[0] for ele in pose_1[i]]
+                        pose_2_list = [ele[0] for ele in pose_2[i]]
+                        fig = plt.figure()
+                        # ax = Axes3D(fig)
+                        # ax.scatter(pose_0_list, pose_1_list, prob_list, c='C1', marker='o')
+                        plt.plot(pose_1_list, pose_0_list, 'o', color='C1')
+                        plt.plot(pose_2_list, pose_0_list, 'o', color='C2')
+                        plt.plot(pose_0_list - shift_val * np.ones(n_test), pose_0_list, color='C2')
+                        plt.plot(pose_0_list + shift_val * np.ones(n_test), pose_0_list, color='C1')
+                        plt.xlabel("+{}/-{} pixel shift in x direction".format(shift_val, shift_val))
+                        plt.ylabel("original x output")
+                        plt.axis('equal')
+                        fig.savefig(os.path.join(save_path, '{}_x_output.png'.format(i)), dpi=fig.dpi)            
         else:
             raise ValueError("Unkonwn test type: {}".format(test_type))
 

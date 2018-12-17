@@ -16,7 +16,7 @@ sys.path.append('../')
 from src.nets.capsnet_mnist import CapsNetMNIST, CapsNetMNISTAE
 import loader as loader
 
-SAVE_PATH = '/home/qge2/workspace/data/out/capsule/capnet/'
+SAVE_PATH = '/home/qge2/workspace/data/out/capsule/capsnet/'
 
 if platform.node() == 'arostitan':
     # data_path = '/home/qge2/workspace/data/homology/'
@@ -100,7 +100,7 @@ def train():
         model_type = 'ae'
     else:
         CapsNetModel = CapsNetMNIST
-        model_type = 'capnet'
+        model_type = 'capsnet'
 
     save_path = os.path.join(SAVE_PATH, model_type, FLAGS.folder)
     save_path = save_path + '/'

@@ -7,15 +7,11 @@
 import numpy as np
 import tensorflow as tf
 
-from src.dataflow.tfprocess import translate_image
-from src.nets.base import BaseModel
-# import src.models.transformation as transformation
+import src.utils.viz as viz
 import src.models.layers as L
 import src.models.capsule as capsule_module
-import src.utils.viz as viz
-# from src.models.transformer import spatial_transformer
-# import src.models.modules as modules
-# import src.models.losses as losses
+from src.nets.base import BaseModel
+from src.models.tftransformer import translate_image
 
 
 # INIT_W = tf.random_normal_initializer(stddev=0.02)
@@ -168,24 +164,6 @@ class CapsNetMNIST(BaseModel):
                 pred = tf.argmax(caps_norm, axis=-1)
                 pred = tf.expand_dims(pred, axis=-1)
             return pred
-
-    # def init_routing(self):
-    #     with tf.name_scope('init_routing'):
-    #         op_list = []
-    #         for bij in self.layers['bij']:
-    #             op = bij.assign(tf.zeros_like(bij))
-    #             op_list.append(op)
-    #         return op_list
-
-    # def routing(self):
-    #     with tf.name_scope('routing'):
-    #         update_list = []
-    #         for bij, aij in zip(self.layers['bij'], self.layers['aij']):
-    #             new_bij = bij + aij
-    #             update = bij.assign(new_bij)
-    #             update_list.append(update)
-
-    #     return update_list
 
     def _get_loss(self):
         with tf.name_scope('loss'):

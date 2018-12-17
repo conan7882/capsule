@@ -15,7 +15,6 @@ import loader as loader
 from src.nets.transform_ae import TransformAE
 
 SAVE_PATH = '/home/qge2/workspace/data/out/capsule/transform_ae/'
-# MNIST_PATH = '/home/qge2/workspace/data/MNIST_data/'
 if platform.node() == 'arostitan':
     MNIST_PATH = '/home/qge2/workspace/data/MNIST_data/'
 elif platform.node() == 'Qians-MacBook-Pro.local':
@@ -29,29 +28,20 @@ def get_args():
                         help='Train the model.')
     parser.add_argument('--test', action='store_true',
                         help='test')
-    parser.add_argument('--filter', action='store_true',
-                        help='')
     parser.add_argument('--test_type', type=str, default='reconstruct',
                         help='')
+    parser.add_argument('--transform', type=str, default='shift',
+                        help='Type of transformation.')
 
-    parser.add_argument('--dataset', type=str, default='mnist',
-                        help='Dataset used for experiment.')
     parser.add_argument('--folder', type=str, default='test',
                         help='Folder for saving.')
 
     parser.add_argument('--load', type=int, default=99,
                         help='Load step of pre-trained')
-    parser.add_argument('--lr', type=float, default=0.001,
-                        help='Init learning rate')
-    parser.add_argument('--keep_prob', type=float, default=1.,
-                        help='keep_prob')
     parser.add_argument('--bsize', type=int, default=128,
                         help='Init learning rate')
-    parser.add_argument('--maxepoch', type=int, default=50,
+    parser.add_argument('--maxepoch', type=int, default=500,
                         help='Max iteration')
-
-    parser.add_argument('--transform', type=str, default='shift',
-                        help='Type of transformation.')
 
     return parser.parse_args()
 
@@ -64,16 +54,15 @@ def train():
         n_recogition = 10
         n_generation = 20
         n_pose = 2
+        wd = 0.0005
+        lr = 0.01
     elif FLAGS.transform == 'affine':
-        # n_capsule = 100
-        # n_recogition = 50
-        # n_generation = 50
-        # n_pose = 9
-
         n_capsule = 25
         n_recogition = 40
         n_generation = 40
         n_pose = 9
+        wd = 0.0001
+        lr = 0.001
 
     save_path = os.path.join(SAVE_PATH, transform_type, FLAGS.folder)
     save_path = save_path + '/'
@@ -84,12 +73,14 @@ def train():
 
     # init training model
     train_model = TransformAE(
-        im_size, n_channels, n_capsule, n_recogition, n_generation, n_pose, transform_type, translate_input=True)
+        im_size, n_channels, n_capsule, n_recogition, n_generation, n_pose,
+        transform_type, wd=wd, translate_input=True)
     train_model.create_train_model()
 
     # init valid model
     valid_model = TransformAE(
-        im_size, n_channels, n_capsule, n_recogition, n_generation, n_pose, transform_type, translate_input=True)
+        im_size, n_channels, n_capsule, n_recogition, n_generation, n_pose,
+        transform_type, translate_input=True)
     valid_model.create_valid_model()
 
     sessconfig = tf.ConfigProto()
@@ -99,7 +90,7 @@ def train():
         saver = tf.train.Saver()
         sess.run(tf.global_variables_initializer())
         writer.add_graph(sess.graph)
-        lr = FLAGS.lr
+        # lr = FLAGS.lr
         for epoch_id in range(FLAGS.maxepoch):
             lr = lr * 0.99
             train_model.train_epoch(
@@ -118,10 +109,6 @@ def test():
         n_generation = 20
         n_pose = 2
     elif FLAGS.transform == 'affine':
-        # n_capsule = 100
-        # n_recogition = 50
-        # n_generation = 50
-        # n_pose = 9
         n_capsule = 25
         n_recogition = 40
         n_generation = 40
@@ -134,8 +121,8 @@ def test():
 
     save_path = os.path.join(SAVE_PATH, transform_type, FLAGS.folder)
     save_path = save_path + '/'
-    # save_path = 'E:/tmp/capsule/'
-    save_path = '/Users/gq/tmp/capsule/'
+    save_path = 'E:/tmp/capsule/'
+    # save_path = '/Users/gq/tmp/capsule/'
 
     train_data, test_data = loader.load_mnist(FLAGS.bsize, data_path=MNIST_PATH, shuffle=True)
     im_size = 28
@@ -152,48 +139,8 @@ def test():
         saver = tf.train.Saver()
         sess.run(tf.global_variables_initializer())
         saver.restore(sess, '{}transformae-epoch-{}'.format(save_path, FLAGS.load))
-        test_model.viz_batch_test(sess, test_data, n_test=n_test, save_path=save_path, test_type=FLAGS.test_type)
-
-def viz_filter():
-    FLAGS = get_args()
-    transform_type = FLAGS.transform
-
-    if FLAGS.transform == 'shift':
-        n_capsule = 30
-        n_recogition = 10
-        n_generation = 20
-        n_pose = 2
-    elif FLAGS.transform == 'affine':
-        # n_capsule = 100
-        # n_recogition = 50
-        # n_generation = 50
-        # n_pose = 9
-
-        n_capsule = 25
-        n_recogition = 40
-        n_generation = 40
-        n_pose = 9
-
-    im_size = 28
-    n_channels = 1
-
-    save_path = os.path.join(SAVE_PATH, transform_type, FLAGS.folder)
-    save_path = save_path + '/'
-    # save_path = 'E:/tmp/capsule/'
-    save_path = '/Users/gq/tmp/capsule/'
-
-    test_model = TransformAE(
-        im_size, n_channels, n_capsule, n_recogition, n_generation, n_pose, transform_type)
-    test_model.create_valid_model()
-
-    sessconfig = tf.ConfigProto()
-    sessconfig.gpu_options.allow_growth = True
-    with tf.Session(config=sessconfig) as sess:
-        writer = tf.summary.FileWriter(save_path)
-        saver = tf.train.Saver()
-        sess.run(tf.global_variables_initializer())
-        saver.restore(sess, '{}transformae-epoch-{}'.format(save_path, FLAGS.load))
-        test_model.viz_filter(sess, save_path=save_path)
+        test_model.viz_batch_test(
+            sess, test_data, n_test=n_test, save_path=save_path, test_type=FLAGS.test_type)
 
 if __name__ == "__main__":
     FLAGS = get_args()
@@ -201,8 +148,3 @@ if __name__ == "__main__":
         train()
     if FLAGS.test:
         test()
-    if FLAGS.filter:
-        viz_filter()
-
-
-
