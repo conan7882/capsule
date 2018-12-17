@@ -103,13 +103,14 @@ def reconstruct_capsule(inputs, num_recognition, num_generation, num_pose, pose_
         input_shape = inputs.get_shape().as_list()
         input_dim = input_shape[1] * input_shape[2] * input_shape[3]
         out = L.linear(
-            out_dim=input_dim, inputs=generation,               
+            out_dim=input_dim, inputs=generation, layer_dict=layer_dict,             
             init_w=init_w, init_b=init_b, wd=wd, bn=bn,
             is_training=is_training, name='out', nl=tf.identity)
+        out_filter = tf.reshape(layer_dict['weights'], shape=[num_generation, input_shape[1], input_shape[2], input_shape[3]])
 
         out = tf.multiply(out, visual_prob)
         out = tf.reshape(out, shape=[-1, input_shape[1], input_shape[2], input_shape[3]])
-        return out, pose, visual_prob, transferred_pose
+        return out, pose, visual_prob, transferred_pose, out_filter
 
 # def conv_capsule_wo_rounting(inputs, bsize, filter_size, stride, n_cap_channel, out_cap_size, 
 #                              init_w=None, init_b=tf.zeros_initializer(), wd=0,

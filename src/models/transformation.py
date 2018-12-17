@@ -6,7 +6,7 @@
 import numpy as np
 
 def gen_pose_shift(bsize, n_pose):
-    return np.random.randint(low=-4, high=5, size=[bsize, n_pose], dtype='l')
+    return np.random.randint(low=-2, high=3, size=[bsize, n_pose], dtype='l')
 
 def gen_affine_trans(bsize):
     s_x = np.random.uniform(low=0.7, high=1.3, size=[bsize, 1])

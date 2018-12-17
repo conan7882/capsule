@@ -55,7 +55,7 @@ class CapsNetMNIST(BaseModel):
             tf.float32, [None, self.im_o_h, self.im_o_w, self.n_channels],
             name='image')
         if self.translate:
-            self.image = translate_image(
+            self.image, _ = translate_image(
                 self.raw_image,
                 [self.im_h, self.im_w],
                 [self.im_o_h, self.im_o_w],
@@ -88,7 +88,7 @@ class CapsNetMNIST(BaseModel):
             name='image')
 
         if self.translate:
-            self.image = translate_image(
+            self.image, _ = translate_image(
                 self.raw_image,
                 [self.im_h, self.im_w],
                 [self.im_o_h, self.im_o_w],

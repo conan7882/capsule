@@ -29,6 +29,10 @@ def get_args():
                         help='Train the model.')
     parser.add_argument('--test', action='store_true',
                         help='test')
+    parser.add_argument('--filter', action='store_true',
+                        help='')
+    parser.add_argument('--test_type', type=str, default='reconstruct',
+                        help='')
 
     parser.add_argument('--dataset', type=str, default='mnist',
                         help='Dataset used for experiment.')
@@ -61,9 +65,14 @@ def train():
         n_generation = 20
         n_pose = 2
     elif FLAGS.transform == 'affine':
-        n_capsule = 100
-        n_recogition = 50
-        n_generation = 50
+        # n_capsule = 100
+        # n_recogition = 50
+        # n_generation = 50
+        # n_pose = 9
+
+        n_capsule = 25
+        n_recogition = 40
+        n_generation = 40
         n_pose = 9
 
     save_path = os.path.join(SAVE_PATH, transform_type, FLAGS.folder)
@@ -75,12 +84,12 @@ def train():
 
     # init training model
     train_model = TransformAE(
-        im_size, n_channels, n_capsule, n_recogition, n_generation, n_pose, transform_type)
+        im_size, n_channels, n_capsule, n_recogition, n_generation, n_pose, transform_type, translate_input=True)
     train_model.create_train_model()
 
     # init valid model
     valid_model = TransformAE(
-        im_size, n_channels, n_capsule, n_recogition, n_generation, n_pose, transform_type)
+        im_size, n_channels, n_capsule, n_recogition, n_generation, n_pose, transform_type, translate_input=True)
     valid_model.create_valid_model()
 
     sessconfig = tf.ConfigProto()
@@ -92,7 +101,7 @@ def train():
         writer.add_graph(sess.graph)
         lr = FLAGS.lr
         for epoch_id in range(FLAGS.maxepoch):
-            lr = lr * 0.95
+            lr = lr * 0.99
             train_model.train_epoch(
                 sess, train_data, lr, summary_writer=writer)
             valid_model.valid_epoch(sess, test_data, summary_writer=writer)
@@ -104,24 +113,29 @@ def test():
     transform_type = FLAGS.transform
 
     if FLAGS.transform == 'shift':
-        # n_capsule = 30
-        # n_recogition = 10
-        # n_generation = 20
-        # n_pose = 2
-
         n_capsule = 30
         n_recogition = 10
         n_generation = 20
         n_pose = 2
     elif FLAGS.transform == 'affine':
-        n_capsule = 100
-        n_recogition = 50
-        n_generation = 50
+        # n_capsule = 100
+        # n_recogition = 50
+        # n_generation = 50
+        # n_pose = 9
+        n_capsule = 25
+        n_recogition = 40
+        n_generation = 40
         n_pose = 9
+
+    if FLAGS.test_type == 'reconstruct':
+        n_test = 20
+    else:
+        n_test = 200
 
     save_path = os.path.join(SAVE_PATH, transform_type, FLAGS.folder)
     save_path = save_path + '/'
-    save_path = 'E:/tmp/capsule/'
+    # save_path = 'E:/tmp/capsule/'
+    save_path = '/Users/gq/tmp/capsule/'
 
     train_data, test_data = loader.load_mnist(FLAGS.bsize, data_path=MNIST_PATH, shuffle=True)
     im_size = 28
@@ -138,8 +152,48 @@ def test():
         saver = tf.train.Saver()
         sess.run(tf.global_variables_initializer())
         saver.restore(sess, '{}transformae-epoch-{}'.format(save_path, FLAGS.load))
-        test_model.viz_batch_test(sess, test_data, n_test=100, save_path=save_path)
+        test_model.viz_batch_test(sess, test_data, n_test=n_test, save_path=save_path, test_type=FLAGS.test_type)
 
+def viz_filter():
+    FLAGS = get_args()
+    transform_type = FLAGS.transform
+
+    if FLAGS.transform == 'shift':
+        n_capsule = 30
+        n_recogition = 10
+        n_generation = 20
+        n_pose = 2
+    elif FLAGS.transform == 'affine':
+        # n_capsule = 100
+        # n_recogition = 50
+        # n_generation = 50
+        # n_pose = 9
+
+        n_capsule = 25
+        n_recogition = 40
+        n_generation = 40
+        n_pose = 9
+
+    im_size = 28
+    n_channels = 1
+
+    save_path = os.path.join(SAVE_PATH, transform_type, FLAGS.folder)
+    save_path = save_path + '/'
+    # save_path = 'E:/tmp/capsule/'
+    save_path = '/Users/gq/tmp/capsule/'
+
+    test_model = TransformAE(
+        im_size, n_channels, n_capsule, n_recogition, n_generation, n_pose, transform_type)
+    test_model.create_valid_model()
+
+    sessconfig = tf.ConfigProto()
+    sessconfig.gpu_options.allow_growth = True
+    with tf.Session(config=sessconfig) as sess:
+        writer = tf.summary.FileWriter(save_path)
+        saver = tf.train.Saver()
+        sess.run(tf.global_variables_initializer())
+        saver.restore(sess, '{}transformae-epoch-{}'.format(save_path, FLAGS.load))
+        test_model.viz_filter(sess, save_path=save_path)
 
 if __name__ == "__main__":
     FLAGS = get_args()
@@ -147,6 +201,8 @@ if __name__ == "__main__":
         train()
     if FLAGS.test:
         test()
+    if FLAGS.filter:
+        viz_filter()
 
 
 

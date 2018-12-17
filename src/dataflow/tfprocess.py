@@ -5,7 +5,7 @@
 
 import tensorflow as tf
 
-def translate_image(input_im, trans_im_size, o_im_size, shift_range=None):
+def translate_image(input_im, trans_im_size, o_im_size, shift_range=None, dtype=tf.float32):
     """ Generate random translate images 
 
         Args:
@@ -36,13 +36,13 @@ def translate_image(input_im, trans_im_size, o_im_size, shift_range=None):
 
         bsize = tf.shape(input_im)[0]
         trans_h = tf.random_uniform(
-            (bsize, 1), minval=min_h, maxval=max_h)
+            (bsize, 1), minval=min_h, maxval=max_h, dtype=dtype)
         trans_w = tf.random_uniform(
-            (bsize, 1), minval=min_w, maxval=max_w)
-        translations = tf.concat((trans_h, trans_w), axis=-1)
+            (bsize, 1), minval=min_w, maxval=max_w, dtype=dtype)
+        translations = tf.cast(tf.concat((trans_h, trans_w), axis=-1), tf.float32)
         trans_im = tf.contrib.image.translate(
             pad_im, translations,
             interpolation='NEAREST',
             name=None)
         trans_im = tf.reshape(trans_im, (-1, trans_im_size[0], trans_im_size[1], input_im.shape.as_list()[-1]))
-        return trans_im
+        return trans_im, translations

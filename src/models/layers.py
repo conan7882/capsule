@@ -145,6 +145,7 @@ def linear(out_dim,
         result = nl(act, name='output')
         if layer_dict is not None:
             layer_dict['cur_input'] = result
+            layer_dict['weights'] = weights
             
         return result
 
